@@ -74,9 +74,7 @@ jobs:
           cp trace-linux/ldd-mangosd.txt "$PKG/trace-bin/"
           cp trace-linux/ldd-realmd.txt "$PKG/trace-bin/"
           cp trace-linux/SOURCE_COMMIT.txt "$PKG/trace-bin/"
-          cp debug/spirit-tap-trace/spirit_tap_trace.sql "$PKG/spirit_tap_trace.sql"
           cp debug/spirit-tap-trace/deploy/* "$PKG/"
-          rm -f "$PKG"/Dockerfile.trace~
           printf '%s\n' \
             'Turtle WoW 1.18.1 - Spirit Tap / Touch of Weakness TRACE kit' \
             '' \
@@ -87,7 +85,8 @@ jobs:
             '5. Reproduce the bug once.' \
             '6. Run 09_СМОТРЕТЬ_TRACE_ЛОГ.cmd and copy the trace lines.' \
             '' \
-            'The primary database volume is cloned and is never written by the trace server.' \
+            'No SQL is applied. The trace database is an unchanged clone of the primary volume.' \
+            'The primary database volume is mounted read-only only during the one-time clone.' \
             'Extracted map data is shared through a directory junction to avoid duplicating many GB.' \
             > "$PKG/README_FIRST.txt"
           chmod +x "$PKG/trace-bin/mangosd" "$PKG/trace-bin/realmd"
