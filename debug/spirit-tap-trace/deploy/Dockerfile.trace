@@ -1,0 +1,5 @@
+FROM ghcr.io/mserajnik/tortoise-server:stable
+
+USER root
+COPY --chmod=0755 trace-bin/mangosd /opt/tortoise/bin/mangosd
+COPY --chmod=0755 trace-bin/realmd /opt/tortoise/bin/realmd
