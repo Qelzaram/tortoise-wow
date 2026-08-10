@@ -1,0 +1,8 @@
+services:
+  mangosd:
+    image: tortoise-spirit-tap-trace:local
+    pull_policy: never
+
+  realmd:
+    image: tortoise-spirit-tap-trace:local
+    pull_policy: never
