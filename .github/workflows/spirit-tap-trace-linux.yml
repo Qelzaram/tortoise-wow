@@ -18,7 +18,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake python3 libace-dev libmariadb-dev libssl-dev zlib1g-dev
+          sudo apt-get install -y build-essential cmake python3 libace-dev libmariadb-dev libssl-dev zlib1g-dev zip
 
       - name: Apply trace instrumentation
         run: python3 ./debug/spirit-tap-trace/patch_trace.py
@@ -47,7 +47,6 @@ jobs:
           test -n "$REALMD"
           cp "$MANGOSD" trace-linux/mangosd
           cp "$REALMD" trace-linux/realmd
-          cp debug/spirit-tap-trace/spirit_tap_trace.sql trace-linux/
           chmod +x trace-linux/mangosd trace-linux/realmd
           ldd trace-linux/mangosd | tee trace-linux/ldd-mangosd.txt
           ldd trace-linux/realmd | tee trace-linux/ldd-realmd.txt
@@ -64,10 +63,40 @@ jobs:
             ghcr.io/mserajnik/tortoise-server:stable \
             -c 'ldd /trace/mangosd && ldd /trace/realmd'
 
-      - name: Upload trace binaries
+      - name: Package isolated trace server kit
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG="$PWD/Turtle-WoW-SpiritTap-TRACE-kit"
+          mkdir -p "$PKG/trace-bin"
+          cp trace-linux/mangosd "$PKG/trace-bin/mangosd"
+          cp trace-linux/realmd "$PKG/trace-bin/realmd"
+          cp trace-linux/ldd-mangosd.txt "$PKG/trace-bin/"
+          cp trace-linux/ldd-realmd.txt "$PKG/trace-bin/"
+          cp trace-linux/SOURCE_COMMIT.txt "$PKG/trace-bin/"
+          cp debug/spirit-tap-trace/spirit_tap_trace.sql "$PKG/spirit_tap_trace.sql"
+          cp debug/spirit-tap-trace/deploy/* "$PKG/"
+          rm -f "$PKG"/Dockerfile.trace~
+          printf '%s\n' \
+            'Turtle WoW 1.18.1 - Spirit Tap / Touch of Weakness TRACE kit' \
+            '' \
+            '1. Stop the primary server normally.' \
+            '2. Run 00_СОЗДАТЬ_TRACE_СЕРВЕР.cmd.' \
+            '3. The installer creates G:\servers\Tortoise-WoW-1.18.1-SpiritTap-TRACE.' \
+            '4. Run 02_ЗАПУСТИТЬ_TRACE.cmd in that new folder.' \
+            '5. Reproduce the bug once.' \
+            '6. Run 09_СМОТРЕТЬ_TRACE_ЛОГ.cmd and copy the trace lines.' \
+            '' \
+            'The primary database volume is cloned and is never written by the trace server.' \
+            'Extracted map data is shared through a directory junction to avoid duplicating many GB.' \
+            > "$PKG/README_FIRST.txt"
+          chmod +x "$PKG/trace-bin/mangosd" "$PKG/trace-bin/realmd"
+          zip -r Turtle-WoW-SpiritTap-TRACE-kit.zip Turtle-WoW-SpiritTap-TRACE-kit
+
+      - name: Upload trace server kit
         uses: actions/upload-artifact@v4
         with:
-          name: turtle-wow-spirit-tap-trace-linux-amd64
-          path: trace-linux/*
+          name: Turtle-WoW-SpiritTap-TRACE-kit
+          path: Turtle-WoW-SpiritTap-TRACE-kit.zip
           if-no-files-found: error
           retention-days: 7
