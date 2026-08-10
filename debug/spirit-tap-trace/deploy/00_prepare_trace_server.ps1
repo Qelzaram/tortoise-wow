@@ -67,7 +67,7 @@ $MainCompose = Get-ComposeFile $MainServer
 
 Write-Host "[TRACE] Primary server: $MainServer"
 Write-Host "[TRACE] Trace server:   $TraceServer"
-Write-Host "[TRACE] Checking that the primary server is stopped..."
+Write-Host '[TRACE] Checking that the primary server is stopped...'
 
 $running = & docker compose --project-directory $MainServer -f $MainCompose ps --status running -q 2>$null
 if ($LASTEXITCODE -ne 0) { throw 'Could not query the primary compose project.' }
@@ -122,11 +122,8 @@ Copy-Item (Join-Path $KitDir 'trace-bin\realmd') (Join-Path $TraceServer 'trace-
 Copy-Item (Join-Path $KitDir 'Dockerfile.trace') (Join-Path $TraceServer 'Dockerfile.trace') -Force
 Copy-Item (Join-Path $KitDir 'compose.trace.override.yaml') (Join-Path $TraceServer 'compose.trace.override.yaml') -Force
 
-$customSqlDir = Join-Path $TraceServer 'storage\database\custom-sql'
-if (Test-Path $customSqlDir) { Remove-Item $customSqlDir -Recurse -Force }
-New-Item -ItemType Directory -Path $customSqlDir -Force | Out-Null
-Copy-Item (Join-Path $KitDir 'spirit_tap_trace.sql') (Join-Path $customSqlDir '999_spirit_tap_trace.sql') -Force
-
+# Preserve the primary custom-sql directory as copied. The trace core requires
+# no SQL migration or script binding; the cloned DB remains unchanged.
 foreach ($file in @('trace_start.ps1','trace_stop.ps1','trace_log.ps1','02_ЗАПУСТИТЬ_TRACE.cmd','08_ОСТАНОВИТЬ_TRACE.cmd','09_СМОТРЕТЬ_TRACE_ЛОГ.cmd')) {
     Copy-Item (Join-Path $KitDir $file) (Join-Path $TraceServer $file) -Force
 }
@@ -177,7 +174,7 @@ $settings = [ordered]@{
     primaryCompose = $MainCompose
     primaryDatabaseVolume = $mainDbVolume
     traceDatabaseVolume = $traceDbVolume
-    sourceCommit = '0da6ca514b247b135e64286733017f1dce298fd6'
+    upstreamBaseCommit = '0da6ca514b247b135e64286733017f1dce298fd6'
 }
 $settings | ConvertTo-Json | Set-Content (Join-Path $TraceServer 'trace-settings.json') -Encoding UTF8
 
@@ -185,9 +182,9 @@ Write-Host ''
 Write-Host '============================================================'
 Write-Host ' TRACE SERVER READY'
 Write-Host " Folder: $TraceServer"
-Write-Host " DB:     $traceDbVolume (independent clone)"
+Write-Host " DB:     $traceDbVolume (independent, unchanged clone)"
 Write-Host ' Core:   tortoise-spirit-tap-trace:local'
-Write-Host ' Main DB was NOT modified.'
+Write-Host ' Primary folder and primary DB volume were NOT modified.'
 Write-Host '============================================================'
 Write-Host ''
 Write-Host 'Run 02_ЗАПУСТИТЬ_TRACE.cmd, reproduce Touch of Weakness once,'
