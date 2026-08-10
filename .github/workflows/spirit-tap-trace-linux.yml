@@ -1,0 +1,73 @@
+name: Spirit Tap Trace Linux
+
+on:
+  push:
+    branches:
+      - debug/spirit-tap-trace
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake python3 libace-dev libmariadb-dev libssl-dev zlib1g-dev
+
+      - name: Apply trace instrumentation
+        run: python3 ./debug/spirit-tap-trace/patch_trace.py
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-spirit-tap-trace \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_STD_MALLOC=ON \
+            -DUSE_SCRIPTS=ON \
+            -DUSE_EXTRACTORS=OFF \
+            -DUSE_DISCORD_BOT=OFF \
+            -DUSE_LIBCURL=OFF
+
+      - name: Build mangosd and realmd
+        run: cmake --build build-spirit-tap-trace --target mangosd realmd --parallel 2
+
+      - name: Collect binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p trace-linux
+          MANGOSD="$(find build-spirit-tap-trace -type f -name mangosd -perm -111 | head -n1)"
+          REALMD="$(find build-spirit-tap-trace -type f -name realmd -perm -111 | head -n1)"
+          test -n "$MANGOSD"
+          test -n "$REALMD"
+          cp "$MANGOSD" trace-linux/mangosd
+          cp "$REALMD" trace-linux/realmd
+          cp debug/spirit-tap-trace/spirit_tap_trace.sql trace-linux/
+          chmod +x trace-linux/mangosd trace-linux/realmd
+          ldd trace-linux/mangosd | tee trace-linux/ldd-mangosd.txt
+          ldd trace-linux/realmd | tee trace-linux/ldd-realmd.txt
+          git rev-parse HEAD > trace-linux/SOURCE_COMMIT.txt
+
+      - name: Check binaries against stable runtime image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull ghcr.io/mserajnik/tortoise-server:stable
+          docker run --rm \
+            -v "$PWD/trace-linux:/trace:ro" \
+            --entrypoint /bin/sh \
+            ghcr.io/mserajnik/tortoise-server:stable \
+            -c 'ldd /trace/mangosd && ldd /trace/realmd'
+
+      - name: Upload trace binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: turtle-wow-spirit-tap-trace-linux-amd64
+          path: trace-linux/*
+          if-no-files-found: error
+          retention-days: 7
