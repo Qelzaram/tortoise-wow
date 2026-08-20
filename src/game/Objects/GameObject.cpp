@@ -371,6 +371,10 @@ void GameObject::Update(uint32 update_diff, uint32 /*p_time*/)
                         }
 
                         m_lootState = GO_READY;             // can be successfully open with some chance
+
+                        // Local server feature: a normal first cast starts the auto-fishing cycle.
+                        if (caster && caster->GetTypeId() == TYPEID_PLAYER && !caster->IsInCombat())
+                            Use(caster);
                     }
                     return;
                 }
@@ -1680,6 +1684,39 @@ void GameObject::Use(Unit* user)
             if (player->GetObjectGuid() != GetOwnerGuid())
                 return;
 
+            // Preserve the successful manual cast position. Recasts use exactly this
+            // destination, so a bobber that landed inside a fishing hole stays there.
+            uint32 const autoFishingSpellId = GetSpellId();
+            float const autoFishingX = GetPositionX();
+            float const autoFishingY = GetPositionY();
+            float const autoFishingZ = GetPositionZ();
+            bool continueAutoFishing = true;
+
+            // Use the normal loot opcode path. Player::AutoStoreLoot() stores
+            // items but does not update LootItem::is_looted/unlootedCount, which
+            // prevents a clean loot release and fishing-hole use accounting.
+            auto autoLootFishing = [player](Loot& fishingLoot)
+            {
+                if (fishingLoot.gold)
+                {
+                    WorldPacket moneyPacket(CMSG_LOOT_MONEY, 0);
+                    player->GetSession()->HandleLootMoneyOpcode(moneyPacket);
+                }
+
+                uint32 const maxSlot = fishingLoot.GetMaxSlotInLootFor(player->GetGUIDLow());
+                for (uint32 slot = 0; slot < maxSlot; ++slot)
+                {
+                    if (!fishingLoot.LootItemInSlot(slot, player->GetGUIDLow()))
+                        continue;
+
+                    WorldPacket lootPacket(CMSG_AUTOSTORE_LOOT_ITEM, 1);
+                    lootPacket << uint8(slot);
+                    player->GetSession()->HandleAutostoreLootItemOpcode(lootPacket);
+                }
+
+                return fishingLoot.isLooted();
+            };
+
             switch (getLootState())
             {
                 case GO_READY:                              // ready for loot
@@ -1742,10 +1779,23 @@ void GameObject::Use(Unit* user)
                         if (fishingHole)                    // will set at success only
                         {
                             fishingHole->Use(player);
+                            continueAutoFishing = autoLootFishing(fishingHole->loot);
+                            player->GetSession()->DoLootRelease(fishingHole->GetObjectGuid());
+
+                            // DoLootRelease accounts for successful uses of a fishing hole.
+                            // Stop when the pool has been depleted instead of continuing in
+                            // ordinary water at the old position.
+                            if (fishingHole->getLootState() == GO_JUST_DEACTIVATED)
+                                continueAutoFishing = false;
+
                             SetLootState(GO_JUST_DEACTIVATED);
                         }
                         else
+                        {
                             player->SendLoot(GetObjectGuid(), success ? LOOT_FISHING : LOOT_FISHING_FAIL);
+                            continueAutoFishing = autoLootFishing(loot);
+                            player->GetSession()->DoLootRelease(GetObjectGuid());
+                        }
                     }
                     else
                     {
@@ -1769,7 +1819,37 @@ void GameObject::Use(Unit* user)
                 }
             }
 
+            float const autoFishingPlayerX = player->GetPositionX();
+            float const autoFishingPlayerY = player->GetPositionY();
+            float const autoFishingPlayerZ = player->GetPositionZ();
+
             player->FinishSpell(CURRENT_CHANNELED_SPELL);
+
+            // The current channel pointer is finalized by the normal update cycle.
+            // Casting immediately from GameObject::Use can therefore be rejected
+            // as SPELL_FAILED_SPELL_IN_PROGRESS. Queue the next cast shortly later.
+            if (continueAutoFishing && autoFishingSpellId && player->IsAlive() && !player->IsInCombat())
+            {
+                player->m_Events.AddLambdaEventAtOffset(
+                    [player, autoFishingSpellId, autoFishingX, autoFishingY, autoFishingZ,
+                     autoFishingPlayerX, autoFishingPlayerY, autoFishingPlayerZ]()
+                    {
+                        if (!player->IsInWorld() || !player->IsAlive() || player->IsInCombat() || player->IsMoving())
+                            return;
+
+                        // Moving after the catch is an explicit stop signal.
+                        if (player->GetDistance(autoFishingPlayerX, autoFishingPlayerY, autoFishingPlayerZ, SizeFactor::None) > 0.1f)
+                            return;
+
+                        // A manual cast during the delay takes priority and stops the loop.
+                        if (player->IsNonMeleeSpellCasted(false, false, false))
+                            return;
+
+                        player->CastSpell(autoFishingX, autoFishingY, autoFishingZ, autoFishingSpellId, false);
+                    },
+                    500);
+            }
+
             return;
         }
         case GAMEOBJECT_TYPE_SUMMONING_RITUAL:              //18

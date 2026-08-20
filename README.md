@@ -1,3 +1,96 @@
+# Turtle WoW — AutoFishing
+
+> Server-side automatic fishing loop for the `autofishing` branch of Tortoise-WoW 1.18.1.
+
+This branch adds a lightweight AutoFishing feature without Playerbots, movement AI, client modifications, database changes, or a persistent toggle system.
+
+The idea is intentionally simple: **walk to the fishing spot yourself, cast Fishing once, and let the server handle the repetitive catch → loot → recast cycle until something interrupts it.**
+
+## How it works
+
+1. Cast **Fishing** manually at the place you want to fish.
+2. When the bobber gets a bite, the server automatically hooks it.
+3. Loot is stored through the normal server loot handlers.
+4. After the current fishing channel is fully finished, the server waits `500 ms`.
+5. Fishing is cast again at the previous bobber position.
+6. The cycle repeats while the player remains in a valid state.
+
+Normal fishing rules are preserved, including fishing skill checks, failed catches/junk behavior, skill gains, and fishing-hole loot logic.
+
+## Automatic stop conditions
+
+AutoFishing stops naturally when:
+
+- the player moves;
+- the player enters combat;
+- the player dies or leaves the world;
+- another spell/cast takes priority during the recast delay;
+- the current catch cannot be fully stored in the inventory;
+- a fishing pool is depleted;
+- the current fishing cast is cancelled before the catch.
+
+There is no permanent AutoFishing state to turn on or off. A normal manual Fishing cast starts a new cycle.
+
+## Fishing pools
+
+Fishing pools use the normal Tortoise-WoW loot-release path.
+
+This is important because successful catches must update the pool's use counter correctly. Once the configured number of successful uses is reached, the pool deactivates normally and AutoFishing does **not** continue fishing ordinary water at the old pool position.
+
+## Implementation
+
+The feature code is deliberately small and currently modifies only:
+
+```text
+src/game/Objects/GameObject.cpp
+```
+
+The branch also modifies this `README.md` for documentation only.
+
+The implementation uses existing core behavior instead of duplicating the inventory and spell systems:
+
+- `WorldSession::HandleAutostoreLootItemOpcode` for item storage and loot bookkeeping;
+- `WorldSession::HandleLootMoneyOpcode` for loot money;
+- `WorldSession::DoLootRelease` for normal fishing-node/fishing-hole release behavior;
+- `m_Events.AddLambdaEventAtOffset` for the delayed recast;
+- the normal coordinate-based `CastSpell(...)` path for the next Fishing cast.
+
+No movement, pathfinding, target selection, combat logic, or Playerbot functionality is added.
+
+## Compatibility
+
+Target client/server version:
+
+```text
+Turtle WoW 1.18.1
+Build 7272
+```
+
+The branch is kept as **one AutoFishing commit on top of the current `main`**. The Docker installer verifies that its official stable core revision exactly matches the branch base before applying the AutoFishing source diff. If upstream `main` advances, rebase this branch onto the new `main` and test it again before deployment.
+
+The feature has been runtime-tested on a local Docker deployment.
+
+## Building / installing
+
+This is a **source branch**. Build it with the same toolchain and deployment process used for the normal Tortoise-WoW server.
+
+For Docker deployments based on the official/community stable image, the safe model is:
+
+```text
+official stable source revision
+        +
+official deployment patches
+        +
+AutoFishing GameObject.cpp diff
+        ↓
+build a local server image
+```
+
+No prebuilt server binaries are committed to this branch.
+
+To disable AutoFishing, simply rebuild/redeploy the normal `main`/stable core. Existing world/character databases and server configuration do not need to be changed for this feature.
+
+---
 
 # Tortoise-WoW
 
@@ -38,7 +131,7 @@ server versions will work, too.
 * **[ACE][5]**: aka Adaptive Communication Environment, provides us with a solid cross-platform framework for abstracting operating system specific details.
 * **[Recast][21]**: In order to create navigation data from the client's map files, Recast is used to do the dirty work. It provides functions for rendering, pathing, etc.
 * **[G3D][6]**: This engine provides the basic framework for handling 3D data and is used to handle basic map data.
-* **[Stormlib][7]**: Provides an abstraction layer for reading from the client's data files.
+* **[Stormlib][7]**: Provides an abstraction layer for reading data from MPQ archive files.
 * **[Zlib][8]/[Zlib for Windows][9]** provides compression algorithms used in both MPQ archive handling and the client/server protocol.
 * **[Bzip2][10]/[Bzip2 for Windows][11]** provides compression algorithms used in MPQ archives.
 * **[OpenSSL][12]/[OpenSSL for Windows][13]** provides encryption algorithms used when authenticating clients.
